@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skrerg Timings</title>
+    <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+    <header class="toolbar">
+        <div class="title">
+            <span class="dot"></span>
+            <span>Тайминги фрагментов</span>
+        </div>
+        <div class="actions">
+            <label class="auto">
+                <input type="checkbox" id="autoRefresh" />
+                <span>Авто</span>
+            </label>
+            <button id="refreshBtn" title="Обновить">Обновить</button>
+        </div>
+    </header>
+
+    <div class="options">
+        <label class="opt">
+            <input type="checkbox" id="showTimecode" checked />
+            <span>Таймкод</span>
+        </label>
+        <label class="opt">
+            <input type="checkbox" id="showSeconds" />
+            <span>Секунды</span>
+        </label>
+        <label class="opt">
+            <input type="checkbox" id="showTimeline" />
+            <span>Позиция на таймлайне</span>
+        </label>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <main id="list" class="list"></main>
+
+    <footer class="footer">
+        <button id="copyBtn" class="primary" disabled>Скопировать тайминги</button>
+        <div id="copyHint" class="copy-hint"></div>
+    </footer>
+
+    <script src="js/CSInterface.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
