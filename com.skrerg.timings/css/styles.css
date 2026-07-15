@@ -107,6 +107,11 @@ button.primary {
 }
 button.primary:hover:not(:disabled) { background: var(--accent-hover); }
 
+button.secondary {
+    width: 100%;
+    font-weight: 600;
+}
+
 .status {
     padding: 6px 10px;
     color: var(--muted);
@@ -172,9 +177,39 @@ button.primary:hover:not(:disabled) { background: var(--accent-hover); }
     text-align: center;
     color: var(--ok);
     font-size: 11px;
-    height: 14px;
+    min-height: 14px;
     margin-top: 4px;
+    word-break: break-word;
 }
+
+.markers {
+    padding: 8px 10px 12px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+}
+
+.markers-title {
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+.marker-input {
+    width: 100%;
+    min-height: 46px;
+    resize: vertical;
+    background: var(--row);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: "Consolas", "Menlo", monospace;
+    font-size: 12px;
+    margin-bottom: 6px;
+    -webkit-user-select: text;
+    user-select: text;
+}
+.marker-input:focus { outline: 1px solid var(--accent); }
 
 #hiddenCopy {
     position: absolute;

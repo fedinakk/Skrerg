@@ -41,8 +41,8 @@ function getSelectedClipTimings() {
         var fps = timebase > 0 ? (TICKS_PER_SECOND / timebase) : 0;
         result.fps = fps;
 
+        // Учитываем только видеосоставляющую — аудиодорожки пропускаем.
         collectFromTracks(seq.videoTracks, "V", result.clips);
-        collectFromTracks(seq.audioTracks, "A", result.clips);
 
         result.ok = true;
     } catch (e) {
@@ -111,4 +111,55 @@ function safeStr(v) {
     } catch (e) {
         return "";
     }
+}
+
+/**
+ * Ставит одиночные маркеры на таймлайне активной секвенции.
+ * @param {string} timecodesJson — JSON-массив таймкодов вида "HH:MM:SS:FF".
+ *   Каждый таймкод трактуется как позиция НА ТАЙМЛАЙНЕ (от начала секвенции).
+ * @return {string} JSON: { ok, error, created }.
+ */
+function placeTimelineMarkers(timecodesJson) {
+    var result = { ok: false, error: "", created: 0 };
+
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) {
+            result.error = "Нет активной секвенции.";
+            return JSON.stringify(result);
+        }
+
+        var timecodes = JSON.parse(timecodesJson);
+        var timebase = Number(seq.timebase);
+        var fps = timebase > 0 ? (TICKS_PER_SECOND / timebase) : 0;
+
+        var count = 0;
+        for (var i = 0; i < timecodes.length; i++) {
+            var sec = timecodeToSeconds(timecodes[i], fps);
+            if (sec === null) continue;
+            // Одиночный маркер без имени/комментария/длительности.
+            seq.markers.createMarker(sec);
+            count++;
+        }
+
+        result.created = count;
+        result.ok = true;
+    } catch (e) {
+        result.error = "Ошибка: " + e.toString();
+    }
+
+    return JSON.stringify(result);
+}
+
+/**
+ * Переводит таймкод "HH:MM:SS:FF" в секунды. Возвращает null при несовпадении.
+ */
+function timecodeToSeconds(tc, fps) {
+    var m = String(tc).match(/(\d+):(\d+):(\d+):(\d+)/);
+    if (!m) return null;
+    var h = Number(m[1]);
+    var mi = Number(m[2]);
+    var s = Number(m[3]);
+    var f = Number(m[4]);
+    return h * 3600 + mi * 60 + s + (fps > 0 ? f / fps : 0);
 }

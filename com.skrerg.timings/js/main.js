@@ -1,7 +1,7 @@
 /*
  * main.js — логика панели Skrerg Timings.
- * Запрашивает у Premiere тайминги выделенных клипов, отображает их и
- * позволяет скопировать в буфер обмена.
+ * Запрашивает у Premiere тайминги выделенных ВИДЕОклипов, отображает их,
+ * копирует в компактном формате и расставляет маркеры на таймлайне.
  */
 (function () {
     "use strict";
@@ -15,9 +15,9 @@
         copyBtn: document.getElementById("copyBtn"),
         copyHint: document.getElementById("copyHint"),
         autoRefresh: document.getElementById("autoRefresh"),
-        showTimecode: document.getElementById("showTimecode"),
-        showSeconds: document.getElementById("showSeconds"),
-        showTimeline: document.getElementById("showTimeline")
+        markerInput: document.getElementById("markerInput"),
+        markerBtn: document.getElementById("markerBtn"),
+        markerHint: document.getElementById("markerHint")
     };
 
     var lastData = { clips: [], fps: 0, sequence: "" };
@@ -36,10 +36,6 @@
         var m = Math.floor(totalSeconds / 60) % 60;
         var h = Math.floor(totalSeconds / 3600);
         return pad(h) + ":" + pad(m) + ":" + pad(s) + ":" + pad(frames);
-    }
-
-    function toSeconds(seconds) {
-        return Number(seconds).toFixed(3) + " с";
     }
 
     function pad(n) {
@@ -93,7 +89,7 @@
         if (clips.length === 0) {
             var empty = document.createElement("div");
             empty.className = "empty";
-            empty.textContent = "Нет выделенных клипов.\nВыделите фрагменты на таймлайне и нажмите «Обновить».";
+            empty.textContent = "Нет выделенных видеоклипов.\nВыделите фрагменты на таймлайне и нажмите «Обновить».";
             els.list.appendChild(empty);
             return;
         }
@@ -124,19 +120,11 @@
 
         var rows = document.createElement("div");
         rows.className = "rows";
-
-        // Тайминги относительно исходного клипа.
-        addRow(rows, "Вход (источник)", formatValue(clip.inSec, fps));
-        addRow(rows, "Выход (источник)", formatValue(clip.outSec, fps));
-        addRow(rows, "Длительность", formatValue(clip.durSec, fps));
-
-        // Опционально — положение на таймлайне.
-        if (els.showTimeline.checked) {
-            addRow(rows, "Начало (таймлайн)", formatValue(clip.startSec, fps));
-            addRow(rows, "Конец (таймлайн)", formatValue(clip.endSec, fps));
-        }
-
+        addRow(rows, "Вход (источник)", toTimecode(clip.inSec, fps));
+        addRow(rows, "Выход (источник)", toTimecode(clip.outSec, fps));
+        addRow(rows, "Длительность", toTimecode(clip.durSec, fps));
         card.appendChild(rows);
+
         return card;
     }
 
@@ -151,48 +139,33 @@
         container.appendChild(v);
     }
 
-    // Собирает строку значения из включённых форматов (таймкод / секунды).
-    function formatValue(seconds, fps) {
-        var parts = [];
-        if (els.showTimecode.checked) parts.push(toTimecode(seconds, fps));
-        if (els.showSeconds.checked) parts.push(toSeconds(seconds));
-        if (parts.length === 0) parts.push(toTimecode(seconds, fps));
-        return parts.join("  ·  ");
-    }
-
-    // ---- Копирование --------------------------------------------------------
+    // ---- Копирование (компактный формат) -----------------------------------
+    // Формат: "in - out + in - out + ..." для всех выделенных клипов.
 
     function buildClipboardText() {
         var clips = lastData.clips || [];
         var fps = lastData.fps;
-        var lines = [];
-
-        if (lastData.sequence) {
-            lines.push("Секвенция: " + lastData.sequence);
-        }
-        if (fps) {
-            lines.push("Частота кадров: " + fps.toFixed(2) + " fps");
-        }
-        lines.push("");
-
+        var parts = [];
         for (var i = 0; i < clips.length; i++) {
             var c = clips[i];
-            lines.push((i + 1) + ". " + (c.source || c.name) + "  [" + c.track + "]");
-            lines.push("   Вход (источник):  " + formatValue(c.inSec, fps));
-            lines.push("   Выход (источник): " + formatValue(c.outSec, fps));
-            lines.push("   Длительность:     " + formatValue(c.durSec, fps));
-            if (els.showTimeline.checked) {
-                lines.push("   Начало (таймлайн): " + formatValue(c.startSec, fps));
-                lines.push("   Конец (таймлайн):  " + formatValue(c.endSec, fps));
-            }
-            lines.push("");
+            parts.push(toTimecode(c.inSec, fps) + " - " + toTimecode(c.outSec, fps));
         }
-
-        return lines.join("\n").replace(/\n+$/, "\n");
+        return parts.join(" + ");
     }
 
     function copyToClipboard() {
         var text = buildClipboardText();
+        if (!text) {
+            flashHint(els.copyHint, "Нет данных для копирования");
+            return;
+        }
+        writeClipboard(text, function (ok) {
+            flashHint(els.copyHint, ok ? "Скопировано" : "Не удалось скопировать");
+        });
+    }
+
+    // Универсальная запись в буфер: execCommand + резерв через Clipboard API.
+    function writeClipboard(text, done) {
         var ta = document.getElementById("hiddenCopy");
         if (!ta) {
             ta = document.createElement("textarea");
@@ -210,24 +183,54 @@
             ok = false;
         }
 
-        // Резервный путь через асинхронный Clipboard API, если доступен.
         if (!ok && navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(function () {
-                flashCopyHint("Скопировано");
+                done(true);
             }, function () {
-                flashCopyHint("Не удалось скопировать");
+                done(false);
             });
             return;
         }
-
-        flashCopyHint(ok ? "Скопировано" : "Не удалось скопировать");
+        done(ok);
     }
 
-    function flashCopyHint(msg) {
-        els.copyHint.textContent = msg;
+    // ---- Расстановка маркеров -----------------------------------------------
+    // Из введённого текста извлекаются ВСЕ таймкоды HH:MM:SS:FF, и на каждой
+    // позиции (относительно таймлайна) ставится одиночный маркер.
+
+    function placeMarkers() {
+        var text = els.markerInput.value || "";
+        var timecodes = text.match(/\d{1,2}:\d{1,2}:\d{1,2}:\d{1,3}/g) || [];
+
+        if (timecodes.length === 0) {
+            flashHint(els.markerHint, "Не найдено таймкодов формата 00:00:00:00");
+            return;
+        }
+
+        var arg = JSON.stringify(timecodes);
+        var script = "placeTimelineMarkers(" + JSON.stringify(arg) + ")";
+
+        cs.evalScript(script, function (res) {
+            var data;
+            try {
+                data = JSON.parse(res);
+            } catch (e) {
+                flashHint(els.markerHint, "Ошибка выполнения скрипта");
+                return;
+            }
+            if (!data.ok) {
+                flashHint(els.markerHint, data.error || "Не удалось расставить маркеры");
+                return;
+            }
+            flashHint(els.markerHint, "Поставлено маркеров: " + data.created);
+        });
+    }
+
+    function flashHint(el, msg) {
+        el.textContent = msg;
         setTimeout(function () {
-            els.copyHint.textContent = "";
-        }, 1800);
+            el.textContent = "";
+        }, 2500);
     }
 
     // ---- Авто-обновление ----------------------------------------------------
@@ -246,12 +249,10 @@
 
     els.refreshBtn.addEventListener("click", refresh);
     els.copyBtn.addEventListener("click", copyToClipboard);
+    els.markerBtn.addEventListener("click", placeMarkers);
     els.autoRefresh.addEventListener("change", function () {
         setAutoRefresh(els.autoRefresh.checked);
     });
-    els.showTimecode.addEventListener("change", render);
-    els.showSeconds.addEventListener("change", render);
-    els.showTimeline.addEventListener("change", render);
 
     refresh();
 })();
