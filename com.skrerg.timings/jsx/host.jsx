@@ -217,18 +217,21 @@ function pad2(n) {
 }
 
 /**
- * Пересобирает фрагменты в конец видеодорожки (копиями, не трогая оригинал).
+ * Пересобирает фрагменты в конец таймлайна (копиями, не трогая оригинал).
+ *
+ * Переносится ВЕСЬ стек дорожек: все видеодорожки (V1, V2, ...) и, если
+ * withAudio, все аудиодорожки (A1, A2, ...). Каждый клип кладётся на свою
+ * дорожку назначения с сохранением взаимного выравнивания между дорожками.
  *
  * @param {string} groupsJson — JSON: массив групп, каждая группа — массив пар
  *   [inTc, outTc] таймкодов "HH:MM:SS:FF" (позиции НА ТАЙМЛАЙНЕ).
- * @param {boolean} withAudio — переносить ли связанное аудио на A1.
+ * @param {boolean} withAudio — переносить ли аудиодорожки.
  * @param {string} startTc — таймкод старта сборки, напр. "00:30:00:00".
  * @param {number} gapSec — пауза в секундах между группами.
  * @return {string} JSON: { ok, error, placed, groups }.
  *
- * Внутри группы сегменты стыкуются вплотную; между группами вставляется
- * пауза gapSec. Источник берётся с первой видеодорожки (V1), результат
- * кладётся на V1 (видео) и A1 (аудио) через overwriteClip.
+ * Внутри группы сегменты стыкуются вплотную (destTime растёт на длину
+ * сегмента); между группами вставляется пауза gapSec.
  */
 function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
     var result = { ok: false, error: "", placed: 0, groups: 0 };
@@ -245,15 +248,12 @@ function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
             return tb > 0 ? (TICKS_PER_SECOND / tb) : 0;
         })();
 
-        if (!seq.videoTracks || seq.videoTracks.numTracks === 0) {
-            result.error = "Нет видеодорожки в секвенции.";
+        var vTracks = seq.videoTracks;
+        var aTracks = seq.audioTracks;
+        if (!vTracks || vTracks.numTracks === 0) {
+            result.error = "Нет видеодорожек в секвенции.";
             return JSON.stringify(result);
         }
-
-        var srcV = seq.videoTracks[0];
-        var dstV = srcV;
-        var dstA = (withAudio && seq.audioTracks && seq.audioTracks.numTracks > 0)
-            ? seq.audioTracks[0] : null;
 
         var groups = JSON.parse(groupsJson);
 
@@ -277,24 +277,21 @@ function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
                 var t2 = tcToSeconds(segs[s][1], fps);
                 if (t1 === null || t2 === null || t2 <= t1) continue;
 
-                // Сегмент может пересекать несколько клипов на дорожке —
-                // разбиваем его по границам исходных клипов.
-                var subs = subSegmentsForRange(srcV, t1, t2);
-                for (var k = 0; k < subs.length; k++) {
-                    var sub = subs[k];
-                    var projItem = sub.item.projectItem;
-                    if (!projItem) continue;
-
-                    setClipInOut(projItem, sub.srcIn, sub.srcIn + sub.dur);
-
-                    dstV.overwriteClip(projItem, destTime);
-                    if (dstA) {
-                        try { dstA.overwriteClip(projItem, destTime); } catch (ea) {}
-                    }
-
-                    destTime += sub.dur;
-                    placed++;
+                // Кладём содержимое диапазона со всех дорожек на те же дорожки
+                // назначения. destTime — общая точка старта сегмента; внутри
+                // сегмента каждый суб-клип смещается на (os - t1), сохраняя
+                // выравнивание между дорожками и внутренние зазоры.
+                var vi;
+                for (vi = 0; vi < vTracks.numTracks; vi++) {
+                    placed += placeTrackRange(vTracks[vi], vTracks[vi], t1, t2, destTime);
                 }
+                if (withAudio && aTracks) {
+                    for (vi = 0; vi < aTracks.numTracks; vi++) {
+                        placed += placeTrackRange(aTracks[vi], aTracks[vi], t1, t2, destTime);
+                    }
+                }
+
+                destTime += (t2 - t1); // сегменты группы стыкуются вплотную
             }
         }
 
@@ -306,6 +303,29 @@ function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
     }
 
     return JSON.stringify(result);
+}
+
+/**
+ * Копирует содержимое диапазона [t1, t2] исходной дорожки на дорожку
+ * назначения, начиная с destTime, сохраняя относительные смещения клипов.
+ * @return {number} сколько клипов вставлено.
+ */
+function placeTrackRange(srcTrack, dstTrack, t1, t2, destTime) {
+    var subs = subSegmentsForRange(srcTrack, t1, t2);
+    var count = 0;
+    for (var k = 0; k < subs.length; k++) {
+        var sub = subs[k];
+        var projItem = sub.item.projectItem;
+        if (!projItem) continue;
+
+        setClipInOut(projItem, sub.srcIn, sub.srcIn + sub.dur);
+        var placeAt = destTime + (sub.os - t1);
+        try {
+            dstTrack.overwriteClip(projItem, placeAt);
+            count++;
+        } catch (e) {}
+    }
+    return count;
 }
 
 /**
