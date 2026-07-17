@@ -243,10 +243,14 @@ function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
             return JSON.stringify(result);
         }
 
-        var fps = (function () {
-            var tb = Number(seq.timebase);
-            return tb > 0 ? (TICKS_PER_SECOND / tb) : 0;
-        })();
+        var tb = Number(seq.timebase);
+        var fps = tb > 0 ? (TICKS_PER_SECOND / tb) : 0;
+        if (fps <= 0) {
+            result.error = "Не удалось определить частоту кадров секвенции.";
+            return JSON.stringify(result);
+        }
+        // База кадров для разбора таймкода HH:MM:SS:FF (поле FF).
+        var fpsR = Math.round(fps);
 
         var vTracks = seq.videoTracks;
         var aTracks = seq.audioTracks;
@@ -257,41 +261,44 @@ function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
 
         var groups = JSON.parse(groupsJson);
 
-        var startSec = tcToSeconds(startTc, fps);
-        if (startSec === null) startSec = 30 * 60; // запасной старт 00:30:00:00
+        // Всё считаем в ЦЕЛЫХ КАДРАХ — иначе накопление ошибки в секундах
+        // даёт случайные пропуски/нахлёсты в 1 кадр между фрагментами.
+        var startF = tcToFrames(startTc, fpsR);
+        if (startF === null) startF = Math.round(30 * 60 * fps);
 
         gapSec = Number(gapSec);
         if (isNaN(gapSec) || gapSec < 0) gapSec = 0;
+        var gapF = Math.round(gapSec * fps);
 
-        var destTime = startSec;
+        var destF = startF;
         var placed = 0;
 
         for (var g = 0; g < groups.length; g++) {
             if (g > 0) {
-                destTime += gapSec; // пауза между группами
+                destF += gapF; // пауза между группами
             }
 
             var segs = groups[g];
             for (var s = 0; s < segs.length; s++) {
-                var t1 = tcToSeconds(segs[s][0], fps);
-                var t2 = tcToSeconds(segs[s][1], fps);
-                if (t1 === null || t2 === null || t2 <= t1) continue;
+                var t1f = tcToFrames(segs[s][0], fpsR);
+                var t2f = tcToFrames(segs[s][1], fpsR);
+                if (t1f === null || t2f === null || t2f <= t1f) continue;
 
                 // Кладём содержимое диапазона со всех дорожек на те же дорожки
-                // назначения. destTime — общая точка старта сегмента; внутри
-                // сегмента каждый суб-клип смещается на (os - t1), сохраняя
-                // выравнивание между дорожками и внутренние зазоры.
+                // назначения. destF — общая точка старта сегмента (в кадрах);
+                // каждый суб-клип смещается на (os - t1f), сохраняя выравнивание
+                // между дорожками и внутренние зазоры.
                 var vi;
                 for (vi = 0; vi < vTracks.numTracks; vi++) {
-                    placed += placeTrackRange(vTracks[vi], vTracks[vi], t1, t2, destTime);
+                    placed += placeTrackRange(vTracks[vi], vTracks[vi], t1f, t2f, destF, fps);
                 }
                 if (withAudio && aTracks) {
                     for (vi = 0; vi < aTracks.numTracks; vi++) {
-                        placed += placeTrackRange(aTracks[vi], aTracks[vi], t1, t2, destTime);
+                        placed += placeTrackRange(aTracks[vi], aTracks[vi], t1f, t2f, destF, fps);
                     }
                 }
 
-                destTime += (t2 - t1); // сегменты группы стыкуются вплотную
+                destF += (t2f - t1f); // сегменты группы стыкуются вплотную
             }
         }
 
@@ -306,51 +313,83 @@ function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
 }
 
 /**
- * Копирует содержимое диапазона [t1, t2] исходной дорожки на дорожку
- * назначения, начиная с destTime, сохраняя относительные смещения клипов.
+ * Копирует содержимое диапазона [t1f, t2f] (в кадрах) исходной дорожки на
+ * дорожку назначения, начиная с кадра destF, сохраняя смещения клипов.
+ * Перенесённому клипу проставляется состояние «выключен» как у оригинала.
  * @return {number} сколько клипов вставлено.
  */
-function placeTrackRange(srcTrack, dstTrack, t1, t2, destTime) {
-    var subs = subSegmentsForRange(srcTrack, t1, t2);
+function placeTrackRange(srcTrack, dstTrack, t1f, t2f, destF, fps) {
+    var subs = subSegmentsForRange(srcTrack, t1f, t2f, fps);
     var count = 0;
     for (var k = 0; k < subs.length; k++) {
         var sub = subs[k];
         var projItem = sub.item.projectItem;
         if (!projItem) continue;
 
-        setClipInOut(projItem, sub.srcIn, sub.srcIn + sub.dur);
-        var placeAt = destTime + (sub.os - t1);
+        setClipInOut(projItem, sub.srcInF / fps, (sub.srcInF + sub.durF) / fps);
+        var placeAtF = destF + (sub.os - t1f);
         try {
-            dstTrack.overwriteClip(projItem, placeAt);
+            dstTrack.overwriteClip(projItem, placeAtF / fps);
             count++;
+
+            // Переносим состояние «выключен» на скопированный клип.
+            if (isDisabled(sub.item)) {
+                var placedItem = findClipAtFrame(dstTrack, placeAtF, fps);
+                if (placedItem) {
+                    try { placedItem.disabled = true; } catch (ed) {}
+                }
+            }
         } catch (e) {}
     }
     return count;
 }
 
 /**
- * Возвращает под-сегменты, покрывающие диапазон [t1, t2] таймлайна,
- * разбитые по границам клипов дорожки. Каждый: { item, srcIn, dur, os }.
+ * Возвращает под-сегменты (в кадрах), покрывающие диапазон [t1f, t2f],
+ * разбитые по границам клипов дорожки. Каждый: { item, srcInF, durF, os }.
  */
-function subSegmentsForRange(track, t1, t2) {
+function subSegmentsForRange(track, t1f, t2f, fps) {
     var subs = [];
     for (var c = 0; c < track.clips.numItems; c++) {
         var it = track.clips[c];
-        var s = it.start.seconds;
-        var e = it.end.seconds;
-        var os = s > t1 ? s : t1;         // начало перекрытия
-        var oe = e < t2 ? e : t2;         // конец перекрытия
-        if (oe - os > 0.0005) {
+        var sf = Math.round(it.start.seconds * fps);
+        var ef = Math.round(it.end.seconds * fps);
+        var os = sf > t1f ? sf : t1f;     // начало перекрытия (кадр)
+        var oe = ef < t2f ? ef : t2f;     // конец перекрытия (кадр)
+        if (oe - os >= 1) {
+            var inF = Math.round(it.inPoint.seconds * fps);
             subs.push({
                 os: os,
                 item: it,
-                srcIn: it.inPoint.seconds + (os - s),
-                dur: oe - os
+                srcInF: inF + (os - sf),
+                durF: oe - os
             });
         }
     }
     subs.sort(function (a, b) { return a.os - b.os; });
     return subs;
+}
+
+/**
+ * Находит клип на дорожке, начинающийся ровно на кадре frame. null, если нет.
+ */
+function findClipAtFrame(track, frame, fps) {
+    for (var c = 0; c < track.clips.numItems; c++) {
+        var it = track.clips[c];
+        if (Math.round(it.start.seconds * fps) === frame) return it;
+    }
+    return null;
+}
+
+/**
+ * Безопасно читает состояние «выключен» у клипа.
+ */
+function isDisabled(item) {
+    try {
+        return item.disabled === true;
+    } catch (e) {
+        return false;
+    }
 }
 
 /**
@@ -370,10 +409,11 @@ function setClipInOut(projItem, inSec, outSec) {
 }
 
 /**
- * Таймкод "HH:MM:SS:FF" → секунды. null при несовпадении.
+ * Таймкод "HH:MM:SS:FF" → номер кадра. null при несовпадении.
+ * fpsR — целая база кадров (обычно round(fps)) для поля FF.
  */
-function tcToSeconds(tc, fps) {
+function tcToFrames(tc, fpsR) {
     var p = parseTimecode(tc);
     if (!p) return null;
-    return p.h * 3600 + p.m * 60 + p.s + (fps > 0 ? p.f / fps : 0);
+    return ((p.h * 60 + p.m) * 60 + p.s) * fpsR + p.f;
 }
