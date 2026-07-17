@@ -114,13 +114,15 @@ function safeStr(v) {
 }
 
 /**
- * Ставит одиночные маркеры на таймлайне активной секвенции.
+ * Ставит одиночные маркеры на таймлайне активной секвенции и, опционально,
+ * делает надрезы (razor) на всех дорожках в этих же позициях.
  * @param {string} timecodesJson — JSON-массив таймкодов вида "HH:MM:SS:FF".
  *   Каждый таймкод трактуется как позиция НА ТАЙМЛАЙНЕ (от начала секвенции).
- * @return {string} JSON: { ok, error, created }.
+ * @param {boolean} withRazor — если true, в каждой позиции добавляется надрез.
+ * @return {string} JSON: { ok, error, created, cuts }.
  */
-function placeTimelineMarkers(timecodesJson) {
-    var result = { ok: false, error: "", created: 0 };
+function placeTimelineMarkers(timecodesJson, withRazor) {
+    var result = { ok: false, error: "", created: 0, cuts: 0 };
 
     try {
         var seq = app.project.activeSequence;
@@ -133,16 +135,39 @@ function placeTimelineMarkers(timecodesJson) {
         var timebase = Number(seq.timebase);
         var fps = timebase > 0 ? (TICKS_PER_SECOND / timebase) : 0;
 
+        // Для надрезов нужен QE-DOM — включаем его только по запросу.
+        var qeSeq = null;
+        if (withRazor) {
+            try {
+                app.enableQE();
+                qeSeq = qe.project.getActiveSequence();
+            } catch (e) {
+                result.error = "Не удалось включить QE для надрезов: " + e.toString();
+            }
+        }
+
         var count = 0;
+        var cuts = 0;
         for (var i = 0; i < timecodes.length; i++) {
-            var sec = timecodeToSeconds(timecodes[i], fps);
-            if (sec === null) continue;
+            var tc = parseTimecode(timecodes[i]);
+            if (tc === null) continue;
+
+            var sec = tc.h * 3600 + tc.m * 60 + tc.s + (fps > 0 ? tc.f / fps : 0);
+
             // Одиночный маркер без имени/комментария/длительности.
             seq.markers.createMarker(sec);
             count++;
+
+            if (qeSeq) {
+                var tcStr = pad2(tc.h) + ":" + pad2(tc.m) + ":" + pad2(tc.s) + ":" + pad2(tc.f);
+                if (razorAllTracks(qeSeq, tcStr)) {
+                    cuts++;
+                }
+            }
         }
 
         result.created = count;
+        result.cuts = cuts;
         result.ok = true;
     } catch (e) {
         result.error = "Ошибка: " + e.toString();
@@ -152,14 +177,41 @@ function placeTimelineMarkers(timecodesJson) {
 }
 
 /**
- * Переводит таймкод "HH:MM:SS:FF" в секунды. Возвращает null при несовпадении.
+ * Делает надрез на всех видео- и аудиодорожках в позиции tcStr (таймкод).
+ * @return {boolean} true, если надрез применён хотя бы к одной дорожке.
  */
-function timecodeToSeconds(tc, fps) {
+function razorAllTracks(qeSeq, tcStr) {
+    var did = false;
+    try {
+        var nv = qeSeq.numVideoTracks;
+        for (var i = 0; i < nv; i++) {
+            var vt = qeSeq.getVideoTrackAt(i);
+            if (vt) { vt.razor(tcStr); did = true; }
+        }
+        var na = qeSeq.numAudioTracks;
+        for (var j = 0; j < na; j++) {
+            var at = qeSeq.getAudioTrackAt(j);
+            if (at) { at.razor(tcStr); did = true; }
+        }
+    } catch (e) {}
+    return did;
+}
+
+/**
+ * Разбирает таймкод "HH:MM:SS:FF" на компоненты. Возвращает null при несовпадении.
+ */
+function parseTimecode(tc) {
     var m = String(tc).match(/(\d+):(\d+):(\d+):(\d+)/);
     if (!m) return null;
-    var h = Number(m[1]);
-    var mi = Number(m[2]);
-    var s = Number(m[3]);
-    var f = Number(m[4]);
-    return h * 3600 + mi * 60 + s + (fps > 0 ? f / fps : 0);
+    return {
+        h: Number(m[1]),
+        m: Number(m[2]),
+        s: Number(m[3]),
+        f: Number(m[4])
+    };
+}
+
+function pad2(n) {
+    n = Math.abs(Number(n));
+    return n < 10 ? "0" + n : "" + n;
 }

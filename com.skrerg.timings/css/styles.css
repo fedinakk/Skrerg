@@ -211,6 +211,11 @@ button.secondary {
 }
 .marker-input:focus { outline: 1px solid var(--accent); }
 
+.razor-opt {
+    color: var(--muted);
+    margin-bottom: 8px;
+}
+
 #hiddenCopy {
     position: absolute;
     left: -9999px;

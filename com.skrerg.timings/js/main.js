@@ -17,7 +17,8 @@
         autoRefresh: document.getElementById("autoRefresh"),
         markerInput: document.getElementById("markerInput"),
         markerBtn: document.getElementById("markerBtn"),
-        markerHint: document.getElementById("markerHint")
+        markerHint: document.getElementById("markerHint"),
+        withRazor: document.getElementById("withRazor")
     };
 
     var lastData = { clips: [], fps: 0, sequence: "" };
@@ -207,8 +208,9 @@
             return;
         }
 
+        var withRazor = !!els.withRazor.checked;
         var arg = JSON.stringify(timecodes);
-        var script = "placeTimelineMarkers(" + JSON.stringify(arg) + ")";
+        var script = "placeTimelineMarkers(" + JSON.stringify(arg) + ", " + withRazor + ")";
 
         cs.evalScript(script, function (res) {
             var data;
@@ -222,7 +224,11 @@
                 flashHint(els.markerHint, data.error || "Не удалось расставить маркеры");
                 return;
             }
-            flashHint(els.markerHint, "Поставлено маркеров: " + data.created);
+            var msg = "Поставлено маркеров: " + data.created;
+            if (withRazor) {
+                msg += " · надрезов: " + data.cuts;
+            }
+            flashHint(els.markerHint, msg);
         });
     }
 
