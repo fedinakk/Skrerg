@@ -42,6 +42,28 @@
         <div id="markerHint" class="copy-hint"></div>
     </section>
 
+    <section class="markers">
+        <div class="markers-title">Пересборка фрагментов в конец дорожки</div>
+        <textarea id="asmInput" class="marker-input asm-input"
+            placeholder="1. 00:01:25:12 - 00:01:52:12 + 00:01:54:12 - 00:02:40:04&#10;2. 00:04:09:01 - 00:04:17:05 + 00:04:57:13 - 00:05:13:11&#10;3. ..."></textarea>
+        <div class="asm-row">
+            <label class="asm-field">
+                <span>Старт</span>
+                <input type="text" id="asmStart" value="00:30:00:00" />
+            </label>
+            <label class="asm-field">
+                <span>Пауза, с</span>
+                <input type="number" id="asmGap" value="10" min="0" step="1" />
+            </label>
+            <label class="opt asm-audio">
+                <input type="checkbox" id="asmAudio" checked />
+                <span>Со звуком</span>
+            </label>
+        </div>
+        <button id="asmBtn" class="secondary">Собрать в конце дорожки</button>
+        <div id="asmHint" class="copy-hint"></div>
+    </section>
+
     <script src="js/CSInterface.js"></script>
     <script src="js/main.js"></script>
 </body>

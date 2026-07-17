@@ -18,8 +18,16 @@
         markerInput: document.getElementById("markerInput"),
         markerBtn: document.getElementById("markerBtn"),
         markerHint: document.getElementById("markerHint"),
-        withRazor: document.getElementById("withRazor")
+        withRazor: document.getElementById("withRazor"),
+        asmInput: document.getElementById("asmInput"),
+        asmStart: document.getElementById("asmStart"),
+        asmGap: document.getElementById("asmGap"),
+        asmAudio: document.getElementById("asmAudio"),
+        asmBtn: document.getElementById("asmBtn"),
+        asmHint: document.getElementById("asmHint")
     };
+
+    var TC_RE = /\d{1,2}:\d{1,2}:\d{1,2}:\d{1,3}/g;
 
     var lastData = { clips: [], fps: 0, sequence: "" };
     var autoTimer = null;
@@ -239,6 +247,60 @@
         }, 2500);
     }
 
+    // ---- Пересборка фрагментов в конец дорожки ------------------------------
+    // Каждая строка ввода — группа. Таймкоды в строке разбиваются на пары
+    // [вход, выход]. Внутри группы сегменты стыкуются, между группами — пауза.
+
+    function parseGroups(text) {
+        var lines = String(text).split(/\r?\n/);
+        var groups = [];
+        for (var i = 0; i < lines.length; i++) {
+            var tcs = lines[i].match(TC_RE);
+            if (!tcs || tcs.length < 2) continue;
+            var segs = [];
+            for (var j = 0; j + 1 < tcs.length; j += 2) {
+                segs.push([tcs[j], tcs[j + 1]]);
+            }
+            if (segs.length) groups.push(segs);
+        }
+        return groups;
+    }
+
+    function assemble() {
+        var groups = parseGroups(els.asmInput.value || "");
+        if (groups.length === 0) {
+            flashHint(els.asmHint, "Не найдено пар таймкодов (мин. вход и выход в строке)");
+            return;
+        }
+
+        var withAudio = !!els.asmAudio.checked;
+        var startTc = (els.asmStart.value || "00:30:00:00").trim();
+        var gap = parseFloat(els.asmGap.value);
+        if (isNaN(gap) || gap < 0) gap = 0;
+
+        var script = "assembleFragments(" +
+            JSON.stringify(JSON.stringify(groups)) + ", " +
+            withAudio + ", " +
+            JSON.stringify(startTc) + ", " +
+            gap + ")";
+
+        cs.evalScript(script, function (res) {
+            var data;
+            try {
+                data = JSON.parse(res);
+            } catch (e) {
+                flashHint(els.asmHint, "Ошибка выполнения скрипта");
+                return;
+            }
+            if (!data.ok) {
+                flashHint(els.asmHint, data.error || "Не удалось собрать фрагменты");
+                return;
+            }
+            flashHint(els.asmHint,
+                "Групп: " + data.groups + " · вставлено фрагментов: " + data.placed);
+        });
+    }
+
     // ---- Авто-обновление ----------------------------------------------------
 
     function setAutoRefresh(on) {
@@ -256,6 +318,7 @@
     els.refreshBtn.addEventListener("click", refresh);
     els.copyBtn.addEventListener("click", copyToClipboard);
     els.markerBtn.addEventListener("click", placeMarkers);
+    els.asmBtn.addEventListener("click", assemble);
     els.autoRefresh.addEventListener("change", function () {
         setAutoRefresh(els.autoRefresh.checked);
     });

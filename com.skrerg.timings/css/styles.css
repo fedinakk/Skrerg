@@ -216,6 +216,41 @@ button.secondary {
     margin-bottom: 8px;
 }
 
+.asm-input { min-height: 70px; }
+
+.asm-row {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 8px;
+    color: var(--muted);
+}
+
+.asm-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11px;
+}
+
+.asm-field input {
+    background: var(--row);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-family: "Consolas", "Menlo", monospace;
+    font-size: 12px;
+    width: 96px;
+    -webkit-user-select: text;
+    user-select: text;
+}
+.asm-field input:focus { outline: 1px solid var(--accent); }
+#asmGap { width: 60px; }
+
+.asm-audio { align-self: center; }
+
 #hiddenCopy {
     position: absolute;
     left: -9999px;

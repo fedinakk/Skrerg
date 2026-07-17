@@ -215,3 +215,145 @@ function pad2(n) {
     n = Math.abs(Number(n));
     return n < 10 ? "0" + n : "" + n;
 }
+
+/**
+ * Пересобирает фрагменты в конец видеодорожки (копиями, не трогая оригинал).
+ *
+ * @param {string} groupsJson — JSON: массив групп, каждая группа — массив пар
+ *   [inTc, outTc] таймкодов "HH:MM:SS:FF" (позиции НА ТАЙМЛАЙНЕ).
+ * @param {boolean} withAudio — переносить ли связанное аудио на A1.
+ * @param {string} startTc — таймкод старта сборки, напр. "00:30:00:00".
+ * @param {number} gapSec — пауза в секундах между группами.
+ * @return {string} JSON: { ok, error, placed, groups }.
+ *
+ * Внутри группы сегменты стыкуются вплотную; между группами вставляется
+ * пауза gapSec. Источник берётся с первой видеодорожки (V1), результат
+ * кладётся на V1 (видео) и A1 (аудио) через overwriteClip.
+ */
+function assembleFragments(groupsJson, withAudio, startTc, gapSec) {
+    var result = { ok: false, error: "", placed: 0, groups: 0 };
+
+    try {
+        var seq = app.project.activeSequence;
+        if (!seq) {
+            result.error = "Нет активной секвенции.";
+            return JSON.stringify(result);
+        }
+
+        var fps = (function () {
+            var tb = Number(seq.timebase);
+            return tb > 0 ? (TICKS_PER_SECOND / tb) : 0;
+        })();
+
+        if (!seq.videoTracks || seq.videoTracks.numTracks === 0) {
+            result.error = "Нет видеодорожки в секвенции.";
+            return JSON.stringify(result);
+        }
+
+        var srcV = seq.videoTracks[0];
+        var dstV = srcV;
+        var dstA = (withAudio && seq.audioTracks && seq.audioTracks.numTracks > 0)
+            ? seq.audioTracks[0] : null;
+
+        var groups = JSON.parse(groupsJson);
+
+        var startSec = tcToSeconds(startTc, fps);
+        if (startSec === null) startSec = 30 * 60; // запасной старт 00:30:00:00
+
+        gapSec = Number(gapSec);
+        if (isNaN(gapSec) || gapSec < 0) gapSec = 0;
+
+        var destTime = startSec;
+        var placed = 0;
+
+        for (var g = 0; g < groups.length; g++) {
+            if (g > 0) {
+                destTime += gapSec; // пауза между группами
+            }
+
+            var segs = groups[g];
+            for (var s = 0; s < segs.length; s++) {
+                var t1 = tcToSeconds(segs[s][0], fps);
+                var t2 = tcToSeconds(segs[s][1], fps);
+                if (t1 === null || t2 === null || t2 <= t1) continue;
+
+                // Сегмент может пересекать несколько клипов на дорожке —
+                // разбиваем его по границам исходных клипов.
+                var subs = subSegmentsForRange(srcV, t1, t2);
+                for (var k = 0; k < subs.length; k++) {
+                    var sub = subs[k];
+                    var projItem = sub.item.projectItem;
+                    if (!projItem) continue;
+
+                    setClipInOut(projItem, sub.srcIn, sub.srcIn + sub.dur);
+
+                    dstV.overwriteClip(projItem, destTime);
+                    if (dstA) {
+                        try { dstA.overwriteClip(projItem, destTime); } catch (ea) {}
+                    }
+
+                    destTime += sub.dur;
+                    placed++;
+                }
+            }
+        }
+
+        result.placed = placed;
+        result.groups = groups.length;
+        result.ok = true;
+    } catch (e) {
+        result.error = "Ошибка: " + e.toString();
+    }
+
+    return JSON.stringify(result);
+}
+
+/**
+ * Возвращает под-сегменты, покрывающие диапазон [t1, t2] таймлайна,
+ * разбитые по границам клипов дорожки. Каждый: { item, srcIn, dur, os }.
+ */
+function subSegmentsForRange(track, t1, t2) {
+    var subs = [];
+    for (var c = 0; c < track.clips.numItems; c++) {
+        var it = track.clips[c];
+        var s = it.start.seconds;
+        var e = it.end.seconds;
+        var os = s > t1 ? s : t1;         // начало перекрытия
+        var oe = e < t2 ? e : t2;         // конец перекрытия
+        if (oe - os > 0.0005) {
+            subs.push({
+                os: os,
+                item: it,
+                srcIn: it.inPoint.seconds + (os - s),
+                dur: oe - os
+            });
+        }
+    }
+    subs.sort(function (a, b) { return a.os - b.os; });
+    return subs;
+}
+
+/**
+ * Задаёт точки in/out проектного элемента (в секундах) для overwriteClip.
+ * mediaType 4 = любой (видео+аудио); при ошибке пробуем без mediaType.
+ */
+function setClipInOut(projItem, inSec, outSec) {
+    try {
+        projItem.setInPoint(inSec, 4);
+        projItem.setOutPoint(outSec, 4);
+    } catch (e) {
+        try {
+            projItem.setInPoint(inSec);
+            projItem.setOutPoint(outSec);
+        } catch (e2) {}
+    }
+}
+
+/**
+ * Таймкод "HH:MM:SS:FF" → секунды. null при несовпадении.
+ */
+function tcToSeconds(tc, fps) {
+    var p = parseTimecode(tc);
+    if (!p) return null;
+    return p.h * 3600 + p.m * 60 + p.s + (fps > 0 ? p.f / fps : 0);
+}
