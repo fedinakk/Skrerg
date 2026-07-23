@@ -52,6 +52,14 @@
         return n < 10 ? "0" + n : "" + n;
     }
 
+    // Короткая читаемая версия ответа ExtendScript для показа в панели.
+    function shorten(res) {
+        var s = (res === undefined || res === null) ? "(пусто)" : String(res);
+        s = s.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+        if (s.length > 220) s = s.substring(0, 220) + "…";
+        return s;
+    }
+
     // ---- Запрос данных из Premiere -----------------------------------------
 
     function refresh() {
@@ -60,7 +68,7 @@
             try {
                 data = JSON.parse(res);
             } catch (e) {
-                setStatus("Не удалось получить данные из Premiere.");
+                setStatus("Скрипт вернул: " + shorten(res));
                 return;
             }
 
@@ -225,7 +233,7 @@
             try {
                 data = JSON.parse(res);
             } catch (e) {
-                flashHint(els.markerHint, "Ошибка выполнения скрипта");
+                flashHint(els.markerHint, "Скрипт вернул: " + shorten(res), 15000);
                 return;
             }
             if (!data.ok) {
@@ -240,11 +248,12 @@
         });
     }
 
-    function flashHint(el, msg) {
+    function flashHint(el, msg, ms) {
         el.textContent = msg;
-        setTimeout(function () {
+        if (el._hintTimer) clearTimeout(el._hintTimer);
+        el._hintTimer = setTimeout(function () {
             el.textContent = "";
-        }, 2500);
+        }, ms || 2500);
     }
 
     // ---- Пересборка фрагментов в конец дорожки ------------------------------
@@ -289,7 +298,7 @@
             try {
                 data = JSON.parse(res);
             } catch (e) {
-                flashHint(els.asmHint, "Ошибка выполнения скрипта");
+                flashHint(els.asmHint, "Скрипт вернул: " + shorten(res), 15000);
                 return;
             }
             if (!data.ok) {

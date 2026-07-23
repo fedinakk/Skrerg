@@ -7,6 +7,72 @@
  * фрагмент был вырезан, а также положение фрагмента на таймлайне.
  */
 
+// --- Полифилл JSON на случай, если движок ExtendScript его не предоставляет.
+// Срабатывает только при отсутствии родного JSON — иначе ничего не меняет.
+if (typeof JSON === "undefined" || !JSON) {
+    JSON = {};
+}
+if (typeof JSON.stringify !== "function") {
+    JSON.stringify = function (value) {
+        function quote(s) {
+            var out = '"';
+            s = String(s);
+            for (var i = 0; i < s.length; i++) {
+                var c = s.charAt(i);
+                var code = s.charCodeAt(i);
+                if (c === '"' || c === '\\') {
+                    out += '\\' + c;
+                } else if (c === '\n') {
+                    out += '\\n';
+                } else if (c === '\r') {
+                    out += '\\r';
+                } else if (c === '\t') {
+                    out += '\\t';
+                } else if (code < 32) {
+                    var h = code.toString(16);
+                    out += '\\u' + '0000'.substring(h.length) + h;
+                } else {
+                    out += c;
+                }
+            }
+            return out + '"';
+        }
+        function str(v) {
+            if (v === null || v === undefined) return "null";
+            var t = typeof v;
+            if (t === "number") return isFinite(v) ? String(v) : "null";
+            if (t === "boolean") return String(v);
+            if (t === "string") return quote(v);
+            if (t === "object") {
+                var i, parts;
+                if (v instanceof Array) {
+                    parts = [];
+                    for (i = 0; i < v.length; i++) {
+                        var e = str(v[i]);
+                        parts.push(e === undefined ? "null" : e);
+                    }
+                    return "[" + parts.join(",") + "]";
+                }
+                parts = [];
+                for (var k in v) {
+                    if (v.hasOwnProperty(k)) {
+                        var sv = str(v[k]);
+                        if (sv !== undefined) parts.push(quote(k) + ":" + sv);
+                    }
+                }
+                return "{" + parts.join(",") + "}";
+            }
+            return undefined;
+        }
+        return str(value);
+    };
+}
+if (typeof JSON.parse !== "function") {
+    JSON.parse = function (text) {
+        return eval("(" + String(text) + ")");
+    };
+}
+
 // Количество тиков в одной секунде во внутреннем времени Premiere Pro.
 var TICKS_PER_SECOND = 254016000000;
 
